@@ -205,7 +205,7 @@ def show_loading_screen(screen, network):
     
     if network.is_host:
         print("Host is sending start signal")
-        network.send_game_start()
+        network.start_game()
     
     running = True
     dots = 0
@@ -256,6 +256,12 @@ def show_lobby(network, screen):
     
     ready = False
     ready_button = pg.Rect(300, 500, 200, 50)
+    
+    def start_game_callback():
+        nonlocal ready
+        ready = True
+    
+    network.set_start_game_callback(start_game_callback)
     
     running = True
     while running:
@@ -312,7 +318,7 @@ def show_lobby(network, screen):
                     if ready_button.collidepoint(event.pos) and not ready:
                         ready = True
                         print("Host is starting the game...")
-                        network.send_game_start()
+                        network.start_game()
                         return False
         
         pg.display.flip()

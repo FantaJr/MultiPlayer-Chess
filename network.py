@@ -4,6 +4,7 @@ import threading
 import time
 import select
 import random
+import struct
 
 class ChessNetwork:
     def __init__(self, is_host=False):
@@ -43,6 +44,9 @@ class ChessNetwork:
             # Bağlantı bekleme thread'i
             threading.Thread(target=self.wait_for_connection, daemon=True).start()
             
+            # Hamle dinleme thread'ini başlat
+            threading.Thread(target=self.listen_for_moves, daemon=True).start()
+            
             return True
         except Exception as e:
             print(f"Error hosting game: {e}")
@@ -53,31 +57,51 @@ class ChessNetwork:
             while not self.connected:
                 try:
                     client_socket, addr = self.socket.accept()
+                    print(f"Connection from: {addr}")
                     
-                    # Şifre kontrolü
-                    password = client_socket.recv(1024).decode()
-                    if password == self.room_password:
-                        client_socket.send("OK".encode())
-                        self.opponent = client_socket
-                        self.connected = True
-                        self.players.append(f"Guest ({addr[0]})")
-                        print("Guest connected successfully")  # Debug için
-                        threading.Thread(target=self.listen_for_moves, daemon=True).start()
-                    else:
-                        client_socket.send("WRONG_PASSWORD".encode())
+                    try:
+                        auth_data = pickle.loads(client_socket.recv(1024))
+                        if isinstance(auth_data, dict):
+                            client_password = auth_data.get('password')
+                            client_room = auth_data.get('room_name')
+                            
+                            if client_room == self.room_name and client_password == self.room_password:
+                                response = {'status': 'accepted'}
+                                client_socket.send(pickle.dumps(response))
+                                
+                                self.opponent = client_socket
+                                self.connected = True
+                                self.players.append(f"Guest ({addr[0]})")
+                                print("Guest connected successfully")
+                                
+                                # Dinleme thread'ini yeniden başlat
+                                threading.Thread(target=self.listen_for_moves, daemon=True).start()
+                                break
+                            else:
+                                response = {
+                                    'status': 'rejected',
+                                    'message': 'Invalid password or room name'
+                                }
+                                client_socket.send(pickle.dumps(response))
+                                client_socket.close()
+                    except Exception as e:
+                        print(f"Auth error: {e}")
                         client_socket.close()
+                        
                 except BlockingIOError:
                     time.sleep(0.1)
+                    continue
                 
         except Exception as e:
-            print(f"Bağlantı bekleme hatası: {e}")
+            print(f"Wait for connection error: {e}")
+            self.handle_connection_error()
 
     def join_game(self, host_ip, room_password, room_name):
         try:
             print(f"Trying to connect to {host_ip}:5555")
-            self.socket.settimeout(5)  # 5 saniye timeout ekle
+            self.socket.settimeout(5)  # 5 saniye timeout
             self.socket.connect((host_ip, 5555))
-            self.socket.settimeout(None)  # Normal moda geri dön
+            self.socket.settimeout(None)
             
             # Oda şifresini ve ismini gönder
             auth_data = {
@@ -87,10 +111,9 @@ class ChessNetwork:
             self.socket.send(pickle.dumps(auth_data))
             
             # Yanıt bekle
-            response = self.socket.recv(1024)
-            if response:
-                response_data = pickle.loads(response)
-                if response_data.get('status') == 'accepted':
+            try:
+                response = pickle.loads(self.socket.recv(1024))
+                if isinstance(response, dict) and response.get('status') == 'accepted':
                     self.connected = True
                     self.opponent = self.socket
                     self.room_name = room_name
@@ -100,54 +123,59 @@ class ChessNetwork:
                     threading.Thread(target=self.listen_for_moves, daemon=True).start()
                     return True
                 else:
-                    print(f"Connection rejected: {response_data.get('message', 'Unknown reason')}")
+                    print(f"Connection rejected: {response.get('message', 'Unknown reason')}")
                     self.socket.close()
                     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     return False
-        except socket.timeout:
-            print("Connection timed out")
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            return False
-        except ConnectionRefusedError:
-            print("Connection refused by host")
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            return False
+            except (pickle.UnpicklingError, EOFError) as e:
+                print(f"Response deserialization error: {e}")
+                self.socket.close()
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                return False
+            
         except Exception as e:
             print(f"Connection error: {e}")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             return False
     
     def send_move(self, move_data):
-        if not self.connected:
-            return False
+        """Hamle verilerini gönder"""
         try:
-            # Hamle verisini pickle ile serialize et
-            data = pickle.dumps(move_data)
-            self.opponent.send(data)
-            return True
-        except:
+            if self.opponent and self.connected:
+                print(f"Sending move: {move_data}")
+                serialized_data = pickle.dumps(move_data)
+                self.opponent.sendall(serialized_data)  # sendall kullanıyoruz
+                return True
+        except Exception as e:
+            print(f"Error sending move: {e}")
             return False
-            
+
     def listen_for_moves(self):
-        while self.connected and self.socket and self.opponent:
+        """Hamleleri dinle"""
+        while True:  # Sonsuz döngü
+            if not (self.connected and self.socket and self.opponent):
+                time.sleep(0.1)
+                continue
+            
             try:
                 ready = select.select([self.opponent], [], [], 0.1)
                 if ready[0]:
                     data = self.opponent.recv(4096)
                     if not data:
                         print("Connection closed")
-                        break
+                        continue
                     
-                    try:
-                        decoded_data = pickle.loads(data)
-                        if isinstance(decoded_data, dict):
-                            if decoded_data.get('type') == 'START_GAME':
-                                print("Received START_GAME signal with color info")
-                                self.plays_white = not decoded_data.get('host_is_white')  # Guest için tersi
-                                self.game_started = True
-                                continue
-                            
-                            print(f"Received move: {decoded_data}")
+                    decoded_data = pickle.loads(data)
+                    print(f"Received: {decoded_data}")
+                    
+                    if isinstance(decoded_data, dict):
+                        if decoded_data.get('type') == 'START_GAME':
+                            print("Received START_GAME signal")
+                            self.plays_white = not decoded_data.get('host_is_white')
+                            self.game_started = True
+                            if hasattr(self, 'start_game_callback'):
+                                self.start_game_callback()
+                        else:
                             if hasattr(self, 'move_callback'):
                                 self.move_callback(
                                     decoded_data['from'],
@@ -156,20 +184,14 @@ class ChessNetwork:
                                     decoded_data['is_white_move'],
                                     decoded_data
                                 )
-                                print("Move processed")
-                    except Exception as e:
-                        print(f"Error processing data: {e}")
-                        continue
+                                print(f"Move processed: {decoded_data['from']} -> {decoded_data['to']}")
                 
             except Exception as e:
-                if not isinstance(e, BlockingIOError):
-                    print(f"Listen error: {e}")
-                    break
+                print(f"Listen error: {e}")
+                time.sleep(0.1)
+                continue
             
             time.sleep(0.01)
-        
-        print("Connection ended")
-        self.connected = False
 
     def handle_move(self, move_data):
         try:
@@ -226,11 +248,8 @@ class ChessNetwork:
 
     def periodic_broadcast(self):
         while self.broadcasting:
-            try:
-                self.broadcast_room()
-            except Exception as e:
-                print(f"Periyodik yayın hatası: {e}")
-            time.sleep(1)  # Her saniye yayınla
+            self.broadcast_room()
+            time.sleep(1)  # Her saniye broadcast yap
 
     def broadcast_room(self):
         try:
@@ -246,7 +265,9 @@ class ChessNetwork:
             }
             
             data = pickle.dumps(room_info)
-            broadcast_socket.sendto(data, ('<broadcast>', 5556))
+            # Hamachi broadcast adresi
+            broadcast_socket.sendto(data, ('25.255.255.255', 5556))  # Hamachi için
+            broadcast_socket.sendto(data, ('255.255.255.255', 5556)) # Normal ağ için
             broadcast_socket.close()
         except Exception as e:
             print(f"Broadcast error: {e}")
@@ -256,49 +277,29 @@ class ChessNetwork:
         listen_socket = None
         try:
             listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listen_socket.settimeout(1.0)
+            listen_socket.settimeout(1)  # 1 saniye timeout
+            listen_socket.bind(('', 5556))
             
-            # Hem localhost hem de tüm arayüzlerden dinle
-            try:
-                listen_socket.bind(('', 5555))
-            except:
-                listen_socket.bind(('127.0.0.1', 5555))
-            
-            broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            
-            try:
-                # Hem localhost hem de network'e broadcast yap
-                broadcast_socket.sendto("LIST_ROOMS".encode(), ('127.0.0.1', 5555))
-                broadcast_socket.sendto("LIST_ROOMS".encode(), ('255.255.255.255', 5555))
-                
-                start_time = time.time()
-                while time.time() - start_time < 2:
-                    try:
-                        data, addr = listen_socket.recvfrom(8192)
-                        try:
-                            room_info = pickle.loads(data)
-                            if isinstance(room_info, dict) and room_info.get("name"):
-                                # Aynı odayı tekrar ekleme
-                                if not any(r.get("name") == room_info["name"] for r in rooms):
-                                    rooms.append(room_info)
-                        except:
-                            continue
-                    except socket.timeout:
-                        continue
-                
-            finally:
-                broadcast_socket.close()
+            start_time = time.time()
+            while time.time() - start_time < 2:  # 2 saniye dinle
+                try:
+                    data, addr = listen_socket.recvfrom(1024)
+                    room_info = pickle.loads(data)
+                    # Aynı odayı tekrar ekleme
+                    if not any(r['host_ip'] == room_info['host_ip'] for r in rooms):
+                        rooms.append(room_info)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    print(f"Room discovery error: {e}")
                 
         except Exception as e:
-            print(f"Oda listesi alınamadı: {e}")
+            print(f"Error getting rooms: {e}")
         finally:
             if listen_socket:
                 listen_socket.close()
         
-        self.active_rooms = rooms
         return rooms
 
     def handle_broadcast_request(self):
@@ -309,23 +310,89 @@ class ChessNetwork:
             except Exception as e:
                 print(f"Broadcast yanıt hatası: {e}") 
 
-    def send_game_start(self):
-        if self.connected and not self.game_started:
+    def start_game(self):
+        if self.connected and self.is_host:
             try:
-                print("Sending game start signal")
-                self.plays_white = random.choice([True, False])  # Host için rastgele renk seç
-                # Renk bilgisini de gönder
+                print("Starting game as host...")
+                self.plays_white = random.choice([True, False])
                 start_data = {
                     'type': 'START_GAME',
                     'host_is_white': self.plays_white
                 }
-                self.opponent.send(pickle.dumps(start_data))
-                self.game_started = True
-                return True
+                print(f"Sending start data: {start_data}")
+                
+                # Start game sinyalini gönder
+                if self.send_move(start_data):
+                    self.game_started = True
+                    if hasattr(self, 'start_game_callback'):
+                        self.start_game_callback()
+                    print("Game started successfully")
+                    return True
+                else:
+                    print("Failed to send start game signal")
+                    return False
             except Exception as e:
-                print(f"Game start signal error: {e}")
+                print(f"Error starting game: {e}")
                 return False
         return False
 
+    def send_data(self, data):
+        """Güvenli veri gönderme fonksiyonu"""
+        try:
+            if self.opponent and self.connected:
+                serialized_data = pickle.dumps(data)
+                # Önce veri boyutunu gönder
+                size = len(serialized_data)
+                self.opponent.send(struct.pack('!I', size))
+                # Sonra veriyi gönder
+                self.opponent.send(serialized_data)
+                return True
+        except Exception as e:
+            print(f"Error sending data: {e}")
+            return False
+
+    def receive_data(self):
+        """Güvenli veri alma fonksiyonu"""
+        try:
+            # Önce veri boyutunu al
+            size_data = self.opponent.recv(4)
+            if not size_data:
+                return None
+            size = struct.unpack('!I', size_data)[0]
+            
+            # Veriyi parça parça al
+            data = b''
+            while len(data) < size:
+                chunk = self.opponent.recv(min(size - len(data), 4096))
+                if not chunk:
+                    return None
+                data += chunk
+            
+            return pickle.loads(data)
+        except Exception as e:
+            print(f"Error receiving data: {e}")
+            return None
+
+    def handle_connection_error(self):
+        """Bağlantı hatalarını yönet"""
+        print("Handling connection error...")
+        try:
+            if self.opponent:
+                self.opponent.close()
+            if self.socket:
+                self.socket.close()
+        except:
+            pass
+        
+        self.connected = False
+        self.game_started = False
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print("Connection reset")
+
     def set_start_game_callback(self, callback):
         self.start_game_callback = callback 
+
+    def send_game_start(self):
+        """Oyunu başlatma sinyali gönder"""
+        print("Host is starting the game...")
+        return self.start_game() 

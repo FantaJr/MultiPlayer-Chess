@@ -299,16 +299,17 @@ class Squares:
 
     def movePiece(self, x, y):
         # Sıra kontrolü
-        if self.network and ((self.turn == 'WHITE' and not self.is_white) or 
-                            (self.turn == 'BLACK' and self.is_white)):
-            print("Not your turn!")
-            return
+        if self.network:
+            is_my_turn = (self.turn == 'WHITE' and self.is_white) or (self.turn == 'BLACK' and not self.is_white)
+            if not is_my_turn:
+                print(f"Not your turn! Current turn: {self.turn}, You are: {'white' if self.is_white else 'black'}")
+                return
 
         if not self.selected_piece:
             return
 
         target_pos = self.convert_mouse_position(x, y)
-        print(f"Moving to: {target_pos}")  # Debug için
+        print(f"Moving to: {target_pos}")
 
         # Eğer aynı kareye tıklandıysa, seçimi iptal et
         if target_pos == self.selected_piece_pos:
@@ -324,80 +325,23 @@ class Squares:
             self.possible_moves = ([], [])
             return
 
-        # Rook kontrolü
-        if self.selected_piece.endswith('KING') and target_pos in self.possible_moves[1]:
-            king_piece = self.positions[self.selected_piece_pos]
-            # Sağa rook
-            right_rook_pos = 'h1' if self.is_white else 'h8'
-            if target_pos == ('g1' if self.is_white else 'g8'):
-                # Kaleyi hareket ettir
-                new_rook_pos = 'f1' if self.is_white else 'f8'
-                rook_piece = self.positions[right_rook_pos]
-                self.positions[new_rook_pos] = rook_piece
-                self.positions[right_rook_pos] = None
-                
-                # Şahı hareket ettir
-                self.positions[target_pos] = king_piece
-                self.positions[self.selected_piece_pos] = None
-                
-                if self.network and self.network.connected:
-                    move_data = {
-                        'from': self.selected_piece_pos,
-                        'to': target_pos,
-                        'piece': king_piece,
-                        'is_white_move': self.is_white,
-                        'is_castle': True,
-                        'rook_from': right_rook_pos,
-                        'rook_to': new_rook_pos,
-                        'rook_piece': rook_piece
-                    }
-                    self.network.send_move(move_data)
-                
-                self.turn = 'BLACK' if self.turn == 'WHITE' else 'WHITE'
-                return
-            
-            # Sola rook
-            left_rook_pos = 'a1' if self.is_white else 'a8'
-            if target_pos == ('c1' if self.is_white else 'c8'):
-                # Kaleyi hareket ettir
-                new_rook_pos = 'd1' if self.is_white else 'd8'
-                rook_piece = self.positions[left_rook_pos]
-                self.positions[new_rook_pos] = rook_piece
-                self.positions[left_rook_pos] = None
-                
-                # Şahı hareket ettir
-                self.positions[target_pos] = king_piece
-                self.positions[self.selected_piece_pos] = None
-                
-                if self.network and self.network.connected:
-                    move_data = {
-                        'from': self.selected_piece_pos,
-                        'to': target_pos,
-                        'piece': king_piece,
-                        'is_white_move': self.is_white,
-                        'is_castle': True,
-                        'rook_from': left_rook_pos,
-                        'rook_to': new_rook_pos,
-                        'rook_piece': rook_piece
-                    }
-                    self.network.send_move(move_data)
-                
-                self.turn = 'BLACK' if self.turn == 'WHITE' else 'WHITE'
-                return
-
         # Hamleyi yap
         moving_piece = self.positions[self.selected_piece_pos]
-        captured_piece = self.positions.get(target_pos)  # Yenilen taşı kaydet
-        
+        captured_piece = self.positions.get(target_pos)
+
         if captured_piece:
-            if captured_piece.startswith('W_'):  # Beyaz taş yenildiyse
+            if captured_piece.startswith('W_'):
                 self.captured_white_pieces.append(captured_piece)
-            else:  # Siyah taş yenildiyse
+            else:
                 self.captured_black_pieces.append(captured_piece)
 
         self.positions[target_pos] = moving_piece
         self.positions[self.selected_piece_pos] = None
         
+        # Sırayı değiştir
+        self.turn = 'BLACK' if self.turn == 'WHITE' else 'WHITE'
+
+        # Network varsa hamleyi gönder
         if self.network and self.network.connected:
             move_data = {
                 'from': self.selected_piece_pos,
@@ -407,12 +351,11 @@ class Squares:
                 'captured_piece': captured_piece if captured_piece else None
             }
             self.network.send_move(move_data)
-        
-        self.move_history.append((self.selected_piece_pos, target_pos))
+
+        # Seçimi temizle
         self.selected_piece = None
         self.selected_piece_pos = None
         self.possible_moves = ([], [])
-        self.turn = 'BLACK' if self.turn == 'WHITE' else 'WHITE'
 
     def undoMove(self):
         if not self.move_history:
@@ -434,22 +377,18 @@ class Squares:
             # Yenilen taş varsa kaydet
             captured_piece = self.positions.get(to_pos)
             if captured_piece:
-                if is_white_move:  # Beyaz taş yediyse
+                if is_white_move:
                     self.captured_black_pieces.append(captured_piece)
-                else:  # Siyah taş yediyse
+                else:
                     self.captured_white_pieces.append(captured_piece)
 
-            # Rok kontrolü
-            if move_data and 'is_castle' in move_data:
-                # Kaleyi hareket ettir
-                self.positions[move_data['rook_to']] = move_data['rook_piece']
-                self.positions[move_data['rook_from']] = None
-            
             # Normal hamle
             self.positions[from_pos] = None
             self.positions[to_pos] = piece
+            
+            # Sırayı değiştir
+            old_turn = self.turn
             self.turn = 'WHITE' if self.turn == 'BLACK' else 'BLACK'
-            self.move_history.append((from_pos, to_pos))
-            print("Opponent move processed successfully")
+            print(f"Turn changed from {old_turn} to {self.turn}")
         except Exception as e:
             print(f"Error handling opponent move: {e}")
