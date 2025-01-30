@@ -22,19 +22,15 @@ class ChessNetwork:
         
     def host_game(self, room_name, room_password, port=5555):
         try:
-            # Önce localhost'u dene, hata verirse tüm arayüzleri dene
-            try:
-                self.socket.bind(('127.0.0.1', port))
-                self.local_ip = '127.0.0.1'
-                print("Hosting on localhost")
-            except:
-                self.socket.bind(('0.0.0.0', port))
-                hostname = socket.gethostname()
-                self.local_ip = socket.gethostbyname(hostname)
-                print(f"Hosting on {self.local_ip}")
-            
+            # SO_REUSEADDR ekle
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind(('0.0.0.0', port))
             self.socket.listen(1)
             self.socket.setblocking(False)
+            
+            hostname = socket.gethostname()
+            self.local_ip = socket.gethostbyname(hostname)
+            print(f"Hosting on {self.local_ip}:{port}")
             
             self.room_name = room_name
             self.room_password = room_password
@@ -48,9 +44,8 @@ class ChessNetwork:
             threading.Thread(target=self.wait_for_connection, daemon=True).start()
             
             return True
-            
         except Exception as e:
-            print(f"Bağlantı hatası: {e}")
+            print(f"Error hosting game: {e}")
             return False
 
     def wait_for_connection(self):
@@ -77,47 +72,49 @@ class ChessNetwork:
         except Exception as e:
             print(f"Bağlantı bekleme hatası: {e}")
 
-    def join_game(self, host_ip, room_password, room_name=None, port=5555):
+    def join_game(self, host_ip, room_password, room_name):
         try:
-            # Yeni bir soket oluştur
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5)
+            print(f"Trying to connect to {host_ip}:5555")
+            self.socket.settimeout(5)  # 5 saniye timeout ekle
+            self.socket.connect((host_ip, 5555))
+            self.socket.settimeout(None)  # Normal moda geri dön
             
-            print(f"Connecting to {host_ip}:{port}")  # Debug için
-            # Host'a bağlan
-            self.socket.connect((host_ip, port))
+            # Oda şifresini ve ismini gönder
+            auth_data = {
+                'password': room_password,
+                'room_name': room_name
+            }
+            self.socket.send(pickle.dumps(auth_data))
             
-            # Şifre kontrolü
-            self.socket.send(room_password.encode())
-            response = self.socket.recv(1024).decode()
-            
-            if response != "OK":
-                print("Yanlış şifre!")
-                self.socket.close()
-                self.socket = None
-                return False
-            
-            print("Connected successfully")  # Debug için
-            # Bağlantı başarılı
-            self.socket.settimeout(None)
-            self.socket.setblocking(False)
-            self.opponent = self.socket
-            self.connected = True
-            self.room_name = room_name
-            self.players = ["Host", "You (Guest)"]
-            
-            # Dinleme thread'ini başlat
-            threading.Thread(target=self.listen_for_moves, daemon=True).start()
-            return True
-            
-        except Exception as e:
-            print(f"Bağlantı hatası: {e}")
-            if self.socket:
-                try:
+            # Yanıt bekle
+            response = self.socket.recv(1024)
+            if response:
+                response_data = pickle.loads(response)
+                if response_data.get('status') == 'accepted':
+                    self.connected = True
+                    self.opponent = self.socket
+                    self.room_name = room_name
+                    self.room_password = room_password
+                    
+                    # Bağlantı dinleme thread'ini başlat
+                    threading.Thread(target=self.listen_for_moves, daemon=True).start()
+                    return True
+                else:
+                    print(f"Connection rejected: {response_data.get('message', 'Unknown reason')}")
                     self.socket.close()
-                except:
-                    pass
-                self.socket = None
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    return False
+        except socket.timeout:
+            print("Connection timed out")
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            return False
+        except ConnectionRefusedError:
+            print("Connection refused by host")
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            return False
+        except Exception as e:
+            print(f"Connection error: {e}")
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             return False
     
     def send_move(self, move_data):
@@ -242,22 +239,17 @@ class ChessNetwork:
             broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
             room_info = {
-                "name": self.room_name,
-                "players": self.players,
-                "password_protected": bool(self.room_password),
-                "host_ip": self.local_ip
+                'name': self.room_name,
+                'password_protected': bool(self.room_password),
+                'players': self.players,
+                'host_ip': self.local_ip
             }
             
             data = pickle.dumps(room_info)
-            
-            try:
-                # Hem localhost hem de network broadcast
-                broadcast_socket.sendto(data, ('127.0.0.1', 5555))
-                broadcast_socket.sendto(data, ('255.255.255.255', 5555))
-            finally:
-                broadcast_socket.close()
+            broadcast_socket.sendto(data, ('<broadcast>', 5556))
+            broadcast_socket.close()
         except Exception as e:
-            print(f"Yayın hatası: {e}")
+            print(f"Broadcast error: {e}")
 
     def get_active_rooms(self):
         rooms = []
