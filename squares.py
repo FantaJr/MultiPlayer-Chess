@@ -7,7 +7,8 @@ class Squares:
         self.network = network
         
         # Eğer ağ bağlantısı varsa ve beyaz değilsek tahtayı ters çevir
-        self.board_flipped = network and not network.plays_white if network else False
+        self.is_white = network.plays_white if network else True
+        self.board_flipped = network and not self.is_white if network else False
         
         # Pozisyonları başlat
         self.positions = self.initialize_positions()
@@ -18,18 +19,17 @@ class Squares:
         
         # Beyaz her zaman başlar
         self.turn = 'WHITE'
-        # Oyuncunun rengi
-        self.is_white = network.plays_white if network else True
         
         # Olası hamleleri tutmak için tuple (normal hamleler, rook hamleleri)
         self.possible_moves = ([], [])
         
+        # Yenilen taşları tutmak için listeler
+        self.captured_white_pieces = []
+        self.captured_black_pieces = []
+        
         # Network varsa hamle callback'ini ayarla
         if network:
             network.set_move_callback(self.handle_opponent_move)
-
-        self.captured_white_pieces = []  # Yenilen beyaz taşlar
-        self.captured_black_pieces = []  # Yenilen siyah taşlar
 
     def initialize_positions(self):
         # Tahtanın gerçek durumu - değişmez pozisyonlar
@@ -145,16 +145,17 @@ class Squares:
 
     def convert_mouse_position(self, x, y):
         """Mouse koordinatlarını tahta koordinatlarına çevirir"""
+        col = x // 100
+        row = y // 100
+        
         if self.board_flipped:
             # Siyah için koordinatları ters çevir
-            col = 7 - (x // 100)
-            row = 7 - (y // 100)
+            file = chr((7 - col) + ord('a'))
+            rank = str(row + 1)
         else:
-            col = x // 100
-            row = y // 100
+            file = chr(col + ord('a'))
+            rank = str(8 - row)
         
-        file = chr(col + ord('a'))
-        rank = str(8 - row)
         return file + rank
 
     def get_possible_moves(self, piece, start_pos):
@@ -297,14 +298,17 @@ class Squares:
         return True
 
     def movePiece(self, x, y):
+        # Sıra kontrolü
         if self.network and ((self.turn == 'WHITE' and not self.is_white) or 
                             (self.turn == 'BLACK' and self.is_white)):
+            print("Not your turn!")
             return
 
         if not self.selected_piece:
             return
 
         target_pos = self.convert_mouse_position(x, y)
+        print(f"Moving to: {target_pos}")  # Debug için
 
         # Eğer aynı kareye tıklandıysa, seçimi iptal et
         if target_pos == self.selected_piece_pos:
