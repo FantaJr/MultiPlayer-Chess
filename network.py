@@ -145,19 +145,18 @@ class ChessNetwork:
                         decoded_data = pickle.loads(data)
                         if isinstance(decoded_data, dict):
                             if decoded_data.get('type') == 'START_GAME':
-                                print("Received START_GAME signal with color info")
-                                self.plays_white = not decoded_data.get('host_is_white')
+                                print("Received START_GAME signal")
                                 self.game_started = True
                                 continue
                             
-                            # Normal hamle verisi
                             print(f"Received move: {decoded_data}")
                             if hasattr(self, 'move_callback'):
                                 self.move_callback(
                                     decoded_data['from'],
                                     decoded_data['to'],
                                     decoded_data['piece'],
-                                    decoded_data['is_white_move']
+                                    decoded_data['is_white_move'],
+                                    decoded_data  # Tüm move_data'yı gönder
                                 )
                                 print("Move processed")
                     except Exception as e:

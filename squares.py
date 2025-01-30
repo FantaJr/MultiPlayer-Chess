@@ -424,7 +424,7 @@ class Squares:
         # Sırayı değiştir
         self.turn = 'BLACK' if self.turn == 'WHITE' else 'WHITE'
 
-    def handle_opponent_move(self, from_pos, to_pos, piece, is_white_move):
+    def handle_opponent_move(self, from_pos, to_pos, piece, is_white_move, move_data=None):
         print(f"Handling opponent move: {from_pos} -> {to_pos}")
         try:
             # Yenilen taş varsa kaydet
@@ -436,7 +436,7 @@ class Squares:
                     self.captured_white_pieces.append(captured_piece)
 
             # Rok kontrolü
-            if 'is_castle' in move_data:
+            if move_data and 'is_castle' in move_data:
                 # Kaleyi hareket ettir
                 self.positions[move_data['rook_to']] = move_data['rook_piece']
                 self.positions[move_data['rook_from']] = None
