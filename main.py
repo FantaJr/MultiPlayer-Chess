@@ -4,6 +4,7 @@ from network import ChessNetwork
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import time
+from bot import ChessBot
 
 def show_main_menu(screen):
     # Ana menüyü pygame penceresinde göster
@@ -498,6 +499,44 @@ def show_password_screen(screen):
         pg.display.flip()
         pg.time.delay(50)
 
+def show_difficulty_selection(screen):
+    font = pg.font.Font(None, 50)
+    small_font = pg.font.Font(None, 36)
+    
+    buttons = {
+        "EASY": pg.Rect(250, 250, 300, 60),
+        "MEDIUM": pg.Rect(250, 350, 300, 60),
+        "HARD": pg.Rect(250, 450, 300, 60)
+    }
+    
+    running = True
+    while running:
+        screen.fill((50, 50, 50))
+        
+        title = font.render("Select Difficulty", True, (255, 255, 255))
+        title_rect = title.get_rect(center=(400, 150))
+        screen.blit(title, title_rect)
+        
+        mouse_pos = pg.mouse.get_pos()
+        
+        for text, rect in buttons.items():
+            color = (100, 100, 100) if rect.collidepoint(mouse_pos) else (70, 70, 70)
+            pg.draw.rect(screen, color, rect, border_radius=10)
+            
+            text_surface = font.render(text, True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=rect.center)
+            screen.blit(text_surface, text_rect)
+        
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                return None
+            if event.type == pg.MOUSEBUTTONDOWN:
+                for difficulty, rect in buttons.items():
+                    if rect.collidepoint(event.pos):
+                        return difficulty
+        
+        pg.display.flip()
+
 def start_game():
     pg.init()
     # Ekranı 900 pixel genişliğe çıkaralım
@@ -545,6 +584,12 @@ def start_game():
                                 squares = Squares(screen, network)
                                 run_game(screen, squares, network)
                             break
+            elif game_mode == "Singleplayer":
+                difficulty = show_difficulty_selection(screen)
+                if difficulty:
+                    bot = ChessBot(difficulty)
+                    squares = Squares(screen, bot=bot)
+                    run_game(screen, squares, None)
             else:  # Singleplayer
                 squares = Squares(screen)
                 run_game(screen, squares, None)
@@ -559,6 +604,8 @@ def run_game(screen, squares, network):
     """Oyun döngüsünü çalıştır"""
     clock = pg.time.Clock()
     running = True
+    game_ended = False
+    menu_button = None
     
     while running:
         for event in pg.event.get():
@@ -566,14 +613,26 @@ def run_game(screen, squares, network):
                 running = False
             elif event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Sol tuş
-                    if squares.selected_piece:
-                        squares.movePiece(event.pos[0], event.pos[1])
-                    else:
-                        squares.selectPiece(event.pos[0], event.pos[1])
+                    if game_ended and menu_button and menu_button.collidepoint(event.pos):
+                        return  # Ana menüye dön
+                    elif not game_ended:
+                        if squares.selected_piece:
+                            squares.movePiece(event.pos[0], event.pos[1])
+                        else:
+                            squares.selectPiece(event.pos[0], event.pos[1])
         
         # Ekranı güncelle
         screen.fill((0, 0, 0))
         squares.drawBoard()
+        
+        # Oyun sonu kontrolü
+        if not game_ended:
+            menu_button = squares.show_game_end_screen()
+            if menu_button:
+                game_ended = True
+        elif game_ended:
+            menu_button = squares.show_game_end_screen()
+        
         pg.display.flip()
         clock.tick(60)
 

@@ -2,9 +2,10 @@ import pygame as pg
 from rules import is_valid_move, is_check, Rules
 
 class Squares:
-    def __init__(self, root, network=None):
+    def __init__(self, root, network=None, bot=None):
         self.root = root
         self.network = network
+        self.bot = bot  # Bot nesnesini ekle
         
         # Eğer ağ bağlantısı varsa ve beyaz değilsek tahtayı ters çevir
         self.is_white = network.plays_white if network else True
@@ -369,6 +370,26 @@ class Squares:
         self.selected_piece_pos = None
         self.possible_moves = ([], [])
 
+        # Hamle yapıldıktan sonra, eğer bot varsa ve sıra siyahtaysa
+        if not self.network and self.bot and self.turn == 'BLACK':
+            # Kısa bir gecikme ekle
+            pg.time.delay(500)
+            # Bot hamlesi
+            bot_move = self.bot.get_move(self.positions, self.turn)
+            if bot_move:
+                start_pos, end_pos, piece = bot_move
+                # Bot hamlesini uygula
+                captured_piece = self.positions.get(end_pos)
+                if captured_piece:
+                    if captured_piece.startswith('W_'):
+                        self.captured_white_pieces.append(captured_piece)
+                    else:
+                        self.captured_black_pieces.append(captured_piece)
+                
+                self.positions[end_pos] = piece
+                self.positions[start_pos] = None
+                self.turn = 'WHITE'
+
     def undoMove(self):
         if not self.move_history:
             return
@@ -404,3 +425,82 @@ class Squares:
             print(f"Turn changed from {old_turn} to {self.turn}")
         except Exception as e:
             print(f"Error handling opponent move: {e}")
+
+    def check_game_end(self):
+        """Oyunun bitip bitmediğini kontrol et"""
+        # Şah mat kontrolü
+        if Rules.is_check(self.positions, self.turn):
+            # Kurtuluş hamlesi var mı kontrol et
+            for start_pos, piece in self.positions.items():
+                if piece:
+                    is_white_piece = piece.startswith('W_')
+                    if (self.turn == 'WHITE' and is_white_piece) or (self.turn == 'BLACK' and not is_white_piece):
+                        for end_pos in self.positions.keys():
+                            if Rules.is_valid_move(piece, start_pos, end_pos, self.positions):
+                                # Hamleyi dene
+                                temp_positions = self.positions.copy()
+                                temp_positions[end_pos] = piece
+                                temp_positions[start_pos] = None
+                                if not Rules.is_check(temp_positions, self.turn):
+                                    return None  # Kurtuluş hamlesi var
+        
+            # Kurtuluş hamlesi yoksa şah mat
+            winner = "Black" if self.turn == 'WHITE' else "White"
+            return {'type': 'checkmate', 'winner': winner}
+        
+        # Pat kontrolü (şahta değil ama legal hamle yok)
+        has_legal_move = False
+        for start_pos, piece in self.positions.items():
+            if piece:
+                is_white_piece = piece.startswith('W_')
+                if (self.turn == 'WHITE' and is_white_piece) or (self.turn == 'BLACK' and not is_white_piece):
+                    for end_pos in self.positions.keys():
+                        if Rules.is_valid_move(piece, start_pos, end_pos, self.positions):
+                            temp_positions = self.positions.copy()
+                            temp_positions[end_pos] = piece
+                            temp_positions[start_pos] = None
+                            if not Rules.is_check(temp_positions, self.turn):
+                                has_legal_move = True
+                                break
+            if has_legal_move:
+                break
+        
+        if not has_legal_move:
+            return {'type': 'stalemate'}
+        
+        return None
+
+    def show_game_end_screen(self):
+        """Oyun sonu ekranını göster"""
+        result = self.check_game_end()
+        if result:
+            # Yarı saydam siyah overlay
+            overlay = pg.Surface((900, 850))
+            overlay.fill((0, 0, 0))
+            overlay.set_alpha(128)
+            self.root.blit(overlay, (0, 0))
+            
+            # Sonuç mesajı
+            if result['type'] == 'checkmate':
+                text = f"{result['winner']} Wins!"
+            else:  # stalemate
+                text = "Draw - Stalemate!"
+            
+            # Mesajı göster
+            font = pg.font.Font(None, 74)
+            text_surface = font.render(text, True, (255, 255, 255))
+            text_rect = text_surface.get_rect(center=(450, 400))
+            self.root.blit(text_surface, text_rect)
+            
+            # Main Menu butonu
+            menu_button = pg.Rect(350, 500, 200, 50)
+            pg.draw.rect(self.root, (70, 70, 70), menu_button, border_radius=10)
+            
+            small_font = pg.font.Font(None, 36)
+            menu_text = small_font.render("Main Menu", True, (255, 255, 255))
+            menu_rect = menu_text.get_rect(center=menu_button.center)
+            self.root.blit(menu_text, menu_rect)
+            
+            return menu_button  # Buton koordinatlarını döndür
+        
+        return None
