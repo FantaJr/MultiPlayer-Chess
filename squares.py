@@ -197,6 +197,7 @@ class Squares:
         return possible_moves, castle_moves
 
     def selectPiece(self, x, y):
+        # Sıra kontrolü - sadece network varsa kontrol et
         if self.network and ((self.turn == 'WHITE' and not self.is_white) or 
                             (self.turn == 'BLACK' and self.is_white)):
             return
@@ -213,13 +214,24 @@ class Squares:
         self.selected_piece = self.positions.get(self.selected_piece_pos)
 
         if self.selected_piece:
-            is_white_piece = self.selected_piece.startswith('W_')
-            if (is_white_piece != self.is_white):
-                self.selected_piece = None
-                self.selected_piece_pos = None
-                self.possible_moves = ([], [])
+            # Singleplayer'da sıra kontrolü
+            if not self.network:
+                is_white_piece = self.selected_piece.startswith('W_')
+                if (is_white_piece and self.turn == 'BLACK') or (not is_white_piece and self.turn == 'WHITE'):
+                    self.selected_piece = None
+                    self.selected_piece_pos = None
+                    self.possible_moves = ([], [])
+                    return
             else:
-                self.possible_moves = self.get_possible_moves(self.selected_piece, self.selected_piece_pos)
+                # Multiplayer sıra kontrolü
+                is_white_piece = self.selected_piece.startswith('W_')
+                if (is_white_piece != self.is_white):
+                    self.selected_piece = None
+                    self.selected_piece_pos = None
+                    self.possible_moves = ([], [])
+                    return
+                
+            self.possible_moves = self.get_possible_moves(self.selected_piece, self.selected_piece_pos)
 
     def is_in_check(self):
         return Rules.is_check(self.positions, self.turn)
@@ -298,7 +310,7 @@ class Squares:
         return True
 
     def movePiece(self, x, y):
-        # Sıra kontrolü
+        # Sıra kontrolü - sadece network varsa kontrol et
         if self.network:
             is_my_turn = (self.turn == 'WHITE' and self.is_white) or (self.turn == 'BLACK' and not self.is_white)
             if not is_my_turn:
