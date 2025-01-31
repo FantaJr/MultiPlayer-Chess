@@ -9,43 +9,74 @@ from bot import ChessBot
 def show_main_menu(screen):
     # Ana menüyü pygame penceresinde göster
     font = pg.font.Font(None, 50)
+    small_font = pg.font.Font(None, 30)
     
     buttons = {
-        "Singleplayer": pg.Rect(250, 300, 300, 60),
-        "Multiplayer": pg.Rect(250, 400, 300, 60)
+        "Singleplayer": pg.Rect(250, 250, 300, 60),
+        "Multiplayer": pg.Rect(250, 350, 300, 60)
     }
+    
+    # Tam ekran toggle butonu
+    fullscreen_button = pg.Rect(250, 450, 300, 40)
+    is_fullscreen = False
     
     running = True
     while running:
-        screen.fill((50, 50, 50))  # Koyu gri arkaplan
+        screen.fill((50, 50, 50))
         
         # Başlık
         title = font.render("Chess Game", True, (255, 255, 255))
-        title_rect = title.get_rect(center=(400, 200))
+        title_rect = title.get_rect(center=(400, 150))
         screen.blit(title, title_rect)
         
         mouse_pos = pg.mouse.get_pos()
         
+        # Ana butonlar
         for text, rect in buttons.items():
-            # Buton üzerinde mouse varsa rengi değiştir
             color = (100, 100, 100) if rect.collidepoint(mouse_pos) else (70, 70, 70)
             pg.draw.rect(screen, color, rect, border_radius=10)
             
-            # Buton metni
             text_surface = font.render(text, True, (255, 255, 255))
             text_rect = text_surface.get_rect(center=rect.center)
             screen.blit(text_surface, text_rect)
+        
+        # Tam ekran butonu
+        fullscreen_color = (100, 100, 100) if fullscreen_button.collidepoint(mouse_pos) else (70, 70, 70)
+        pg.draw.rect(screen, fullscreen_color, fullscreen_button, border_radius=10)
+        fullscreen_text = small_font.render(f"Fullscreen: {'On' if is_fullscreen else 'Off'}", True, (255, 255, 255))
+        fullscreen_rect = fullscreen_text.get_rect(center=fullscreen_button.center)
+        screen.blit(fullscreen_text, fullscreen_rect)
         
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 return None
             if event.type == pg.MOUSEBUTTONDOWN:
                 if event.button == 1:
+                    # Ana butonlar kontrolü
                     for text, rect in buttons.items():
                         if rect.collidepoint(event.pos):
                             return text
+                    
+                    # Tam ekran butonu kontrolü
+                    if fullscreen_button.collidepoint(event.pos):
+                        is_fullscreen = not is_fullscreen
+                        if is_fullscreen:
+                            screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                        else:
+                            screen = pg.display.set_mode((900, 850))
+            
+            # F11 tuşu ile tam ekran toggle
+            elif event.type == pg.KEYDOWN:
+                if event.key == pg.K_F11:
+                    is_fullscreen = not is_fullscreen
+                    if is_fullscreen:
+                        screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                    else:
+                        screen = pg.display.set_mode((900, 850))
         
         pg.display.flip()
+    
+    return None
 
 def show_multiplayer_options():
     root = tk.Tk()
@@ -622,9 +653,11 @@ def show_elo_selection(screen):
 
 def start_game():
     pg.init()
-    # Ekranı 900 pixel genişliğe çıkaralım
     screen = pg.display.set_mode((900, 850))
     pg.display.set_caption("Chess")
+    
+    # Tam ekran durumunu tut
+    is_fullscreen = False
     
     while True:
         game_mode = show_main_menu(screen)
@@ -633,6 +666,16 @@ def start_game():
             
         network = None
         try:
+            # F11 tuşu kontrolü için event loop
+            for event in pg.event.get():
+                if event.type == pg.KEYDOWN:
+                    if event.key == pg.K_F11:
+                        is_fullscreen = not is_fullscreen
+                        if is_fullscreen:
+                            screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                        else:
+                            screen = pg.display.set_mode((900, 850))
+            
             if game_mode == "Multiplayer":
                 while True:
                     result = show_rooms_list(screen)
@@ -690,6 +733,11 @@ def run_game(screen, squares, network):
     game_ended = False
     menu_button = None
     
+    # Font ayarla
+    signature_font = pg.font.Font(None, 24)
+    signature_text = signature_font.render("Made by Fanta", True, (200, 200, 200))
+    signature_rect = signature_text.get_rect(bottomright=(890, 845))  # Sağ alt köşe
+    
     while running:
         for event in pg.event.get():
             if event.type == pg.QUIT:
@@ -707,6 +755,9 @@ def run_game(screen, squares, network):
         # Ekranı güncelle
         screen.fill((0, 0, 0))
         squares.drawBoard()
+        
+        # İmzayı ekle
+        screen.blit(signature_text, signature_rect)
         
         # Oyun sonu kontrolü
         if not game_ended:
