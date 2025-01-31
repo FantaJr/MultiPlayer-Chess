@@ -537,6 +537,89 @@ def show_difficulty_selection(screen):
         
         pg.display.flip()
 
+def show_elo_selection(screen):
+    font = pg.font.Font(None, 50)
+    small_font = pg.font.Font(None, 36)
+    
+    # Slider özellikleri
+    slider_rect = pg.Rect(250, 300, 400, 10)
+    slider_button_radius = 15
+    slider_pos = 250  # Başlangıç pozisyonu
+    dragging = False
+    
+    # ELO aralığı
+    min_elo = 400
+    max_elo = 3000
+    current_elo = 1500  # Başlangıç ELO'su
+    
+    # Start butonu
+    start_button = pg.Rect(350, 500, 200, 50)
+    
+    running = True
+    while running:
+        screen.fill((50, 50, 50))
+        
+        # Başlık
+        title = font.render("Select Bot ELO", True, (255, 255, 255))
+        title_rect = title.get_rect(center=(400, 150))
+        screen.blit(title, title_rect)
+        
+        # Mevcut ELO'yu göster
+        elo_text = font.render(f"ELO: {current_elo}", True, (255, 255, 255))
+        elo_rect = elo_text.get_rect(center=(400, 250))
+        screen.blit(elo_text, elo_rect)
+        
+        # Slider'ı çiz
+        pg.draw.rect(screen, (100, 100, 100), slider_rect)
+        
+        # Slider düğmesini çiz
+        button_pos = (slider_pos, slider_rect.centery)
+        pg.draw.circle(screen, (200, 200, 200), button_pos, slider_button_radius)
+        
+        # Start butonunu çiz
+        mouse_pos = pg.mouse.get_pos()
+        button_color = (100, 100, 100) if start_button.collidepoint(mouse_pos) else (70, 70, 70)
+        pg.draw.rect(screen, button_color, start_button, border_radius=10)
+        
+        start_text = small_font.render("Start Game", True, (255, 255, 255))
+        start_rect = start_text.get_rect(center=start_button.center)
+        screen.blit(start_text, start_rect)
+        
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                return None
+                
+            elif event.type == pg.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    # Slider düğmesi tıklaması
+                    button_rect = pg.Rect(slider_pos - slider_button_radius,
+                                        slider_rect.centery - slider_button_radius,
+                                        slider_button_radius * 2,
+                                        slider_button_radius * 2)
+                    if button_rect.collidepoint(event.pos):
+                        dragging = True
+                    
+                    # Start butonu tıklaması
+                    elif start_button.collidepoint(event.pos):
+                        return current_elo
+            
+            elif event.type == pg.MOUSEBUTTONUP:
+                if event.button == 1:
+                    dragging = False
+            
+            elif event.type == pg.MOUSEMOTION:
+                if dragging:
+                    slider_pos = max(slider_rect.left,
+                                   min(event.pos[0], slider_rect.right))
+                    # ELO'yu hesapla
+                    elo_range = max_elo - min_elo
+                    slider_range = slider_rect.width
+                    current_elo = min_elo + int((slider_pos - slider_rect.left) 
+                                              * elo_range / slider_range)
+                    current_elo = (current_elo // 50) * 50  # 50'lik adımlarla yuvarla
+        
+        pg.display.flip()
+
 def start_game():
     pg.init()
     # Ekranı 900 pixel genişliğe çıkaralım
@@ -585,9 +668,9 @@ def start_game():
                                 run_game(screen, squares, network)
                             break
             elif game_mode == "Singleplayer":
-                difficulty = show_difficulty_selection(screen)
-                if difficulty:
-                    bot = ChessBot(difficulty)
+                elo = show_elo_selection(screen)
+                if elo:
+                    bot = ChessBot(elo=elo)
                     squares = Squares(screen, bot=bot)
                     run_game(screen, squares, None)
             else:  # Singleplayer
